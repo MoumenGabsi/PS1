@@ -71,7 +71,7 @@ class OrdersRepository:
                      FROM commandes c
                      LEFT JOIN produits p ON c.produit_id = p.id
                      LEFT JOIN fournisseurs f ON c.fournisseur_id = f.id
-                     ORDER BY c.date_commande DESC"""
+                     ORDER BY c.id"""
             cursor.execute(sql)
 
             result = cursor.fetchall()
@@ -144,7 +144,7 @@ class OrdersRepository:
                      LEFT JOIN produits p ON c.produit_id = p.id
                      LEFT JOIN fournisseurs f ON c.fournisseur_id = f.id
                      WHERE p.nom LIKE %s OR f.nom LIKE %s
-                     ORDER BY c.date_commande DESC"""
+                     ORDER BY c.id"""
             cursor.execute(sql, (search_param, search_param))
 
             result = cursor.fetchall()
@@ -171,7 +171,7 @@ class OrdersRepository:
                      LEFT JOIN produits p ON c.produit_id = p.id
                      LEFT JOIN fournisseurs f ON c.fournisseur_id = f.id
                      WHERE c.fournisseur_id = %s
-                     ORDER BY c.date_commande DESC"""
+                     ORDER BY c.id"""
             cursor.execute(sql, (supplier_id,))
 
             result = cursor.fetchall()
@@ -198,7 +198,7 @@ class OrdersRepository:
                      LEFT JOIN produits p ON c.produit_id = p.id
                      LEFT JOIN fournisseurs f ON c.fournisseur_id = f.id
                      WHERE c.produit_id = %s
-                     ORDER BY c.date_commande DESC"""
+                     ORDER BY c.id"""
             cursor.execute(sql, (product_id,))
 
             result = cursor.fetchall()

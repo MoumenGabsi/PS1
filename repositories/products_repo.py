@@ -71,7 +71,7 @@ class ProductsRepository:
                      FROM produits p
                               LEFT JOIN categories c ON p.categorie_id = c.id
                               LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
-                     ORDER BY p.nom"""
+                     ORDER BY p.id"""
             cursor.execute(sql)
 
             result = cursor.fetchall()
@@ -150,7 +150,7 @@ class ProductsRepository:
                               LEFT JOIN categories c ON p.categorie_id = c.id
                               LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
                      WHERE p.nom LIKE %s
-                     ORDER BY p.nom"""
+                     ORDER BY p.id"""
             cursor.execute(sql, (search_param,))
 
             result = cursor.fetchall()
@@ -177,7 +177,7 @@ class ProductsRepository:
                               LEFT JOIN categories c ON p.categorie_id = c.id
                               LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
                      WHERE p.categorie_id = %s
-                     ORDER BY p.nom"""
+                     ORDER BY p.id"""
             cursor.execute(sql, (category_id,))
 
             result = cursor.fetchall()

@@ -62,7 +62,7 @@ class CategoriesRepository:
             conn = get_connection('gestion_stock')
             cursor = conn.cursor(dictionary=True)
 
-            sql = "SELECT * FROM categories ORDER BY nom"
+            sql = "SELECT * FROM categories ORDER BY id"
             cursor.execute(sql)
 
             result = cursor.fetchall()
@@ -128,7 +128,7 @@ class CategoriesRepository:
             cursor = conn.cursor(dictionary=True)
 
             search_param = f"%{search_term}%"
-            sql = "SELECT * FROM categories WHERE nom LIKE %s OR description LIKE %s ORDER BY nom"
+            sql = "SELECT * FROM categories WHERE nom LIKE %s OR description LIKE %s ORDER BY id"
             cursor.execute(sql, (search_param, search_param))
 
             result = cursor.fetchall()
