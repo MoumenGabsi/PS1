@@ -22,6 +22,9 @@ class ProductsTab(ctk.CTkFrame):
         self.validator = InputValidators()
         self.selected_row = None
         self.table_rows = []
+        self.products_data = []  # Store current data for sorting
+        self.sort_column = 0  # Column index for sorting (0 = ID)
+        self.sort_ascending = True  # Sort direction
         
         self._create_widgets()
         self._load_data()
@@ -177,7 +180,10 @@ class ProductsTab(ctk.CTkFrame):
             row.destroy()
         self.table_rows.clear()
         
-        # Create header row
+        # Load data from database
+        self.products_data = self.products_repo.read_all()
+        
+        # Create header row with clickable columns
         header_row = ctk.CTkFrame(self.table_frame, fg_color="#1a1a1a", height=40)
         header_row.pack(fill="x", padx=0, pady=0)
         header_row.pack_propagate(False)
@@ -185,26 +191,34 @@ class ProductsTab(ctk.CTkFrame):
         headers = ['ID', 'Name', 'Category', 'Supplier', 'Stock', 'Unit Price', 'Purchase Price']
         widths = [30, 120, 100, 100, 60, 80, 80]
         
-        for header, width in zip(headers, widths):
-            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a")
+        for col_idx, (header, width) in enumerate(zip(headers, widths)):
+            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a", cursor="hand2")
             col.pack(side="left", fill="y", padx=4, pady=8)
+            col.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+            
+            # Show sort indicator if this column is sorted
+            label_text = header
+            if col_idx == self.sort_column:
+                arrow = "▲" if self.sort_ascending else "▼"
+                label_text = f"{header} {arrow}"
+            
             lbl = ctk.CTkLabel(
                 col,
-                text=header,
+                text=label_text,
                 font=("Arial", 11, "bold"),
                 text_color="#3a7ebf",
                 width=width
             )
             lbl.pack(fill="both", expand=True)
+            lbl.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
         
         self.table_rows.append(header_row)
         
         # Load category filter
         self._load_category_filter()
         
-        # Load data
-        products = self.products_repo.read_all()
-        for product in products:
+        # Load data rows from products_data
+        for product in self.products_data:
             self._add_table_row(
                 product['id'],
                 product['nom'],
@@ -484,3 +498,87 @@ class ProductsTab(ctk.CTkFrame):
                 self._load_data()
             else:
                 ErrorDialog.show(self, "Error", "Failed to delete product")
+    
+    def _on_sort_column(self, column_idx):
+        """Sort table by column - called when column header is clicked"""
+        # If clicking same column, toggle sort direction
+        if self.sort_column == column_idx:
+            self.sort_ascending = not self.sort_ascending
+        else:
+            self.sort_column = column_idx
+            self.sort_ascending = True
+        
+        # Define sort keys for each column
+        sort_keys = ['id', 'nom', 'categorie_nom', 'fournisseur_nom', 'quantite_stock', 'prix_unitaire', 'prix_achat']
+        key = sort_keys[column_idx]
+        
+        # Sort the data
+        if column_idx in [0, 4, 5, 6]:  # ID, Stock, Unit Price, Purchase Price - numeric
+            try:
+                self.products_data.sort(
+                    key=lambda x: float(x.get(key, 0)) if key in ['prix_unitaire', 'prix_achat'] else int(x.get(key, 0)),
+                    reverse=not self.sort_ascending
+                )
+            except (ValueError, TypeError):
+                self.products_data.sort(
+                    key=lambda x: str(x.get(key, '')),
+                    reverse=not self.sort_ascending
+                )
+        else:  # String columns - case-insensitive sort
+            self.products_data.sort(
+                key=lambda x: str(x.get(key, '')).lower(),
+                reverse=not self.sort_ascending
+            )
+        
+        # Reload table with sorted data
+        self._reload_table_from_data()
+    
+    def _reload_table_from_data(self):
+        """Reload table display from sorted products_data"""
+        # Clear table rows
+        for row in self.table_rows:
+            row.destroy()
+        self.table_rows.clear()
+        
+        # Recreate header row with sort indicator
+        header_row = ctk.CTkFrame(self.table_frame, fg_color="#1a1a1a", height=40)
+        header_row.pack(fill="x", padx=0, pady=0)
+        header_row.pack_propagate(False)
+        
+        headers = ['ID', 'Name', 'Category', 'Supplier', 'Stock', 'Unit Price', 'Purchase Price']
+        widths = [30, 120, 100, 100, 60, 80, 80]
+        
+        for col_idx, (header, width) in enumerate(zip(headers, widths)):
+            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a", cursor="hand2")
+            col.pack(side="left", fill="y", padx=4, pady=8)
+            col.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+            
+            # Show sort indicator
+            label_text = header
+            if col_idx == self.sort_column:
+                arrow = "▲" if self.sort_ascending else "▼"
+                label_text = f"{header} {arrow}"
+            
+            lbl = ctk.CTkLabel(
+                col,
+                text=label_text,
+                font=("Arial", 11, "bold"),
+                text_color="#3a7ebf",
+                width=width
+            )
+            lbl.pack(fill="both", expand=True)
+            lbl.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+        
+        self.table_rows.append(header_row)
+        
+        # Add sorted data rows
+        for product in self.products_data:
+            self._add_table_row(
+                product['id'],
+                product['nom'],
+                product['categorie_nom'],
+                product['fournisseur_nom'],
+                product['quantite_stock'],
+                f"{product['prix_unitaire']:.2f}",
+                f"{product['prix_achat']:.2f}"
+            )

@@ -22,6 +22,9 @@ class OrdersTab(ctk.CTkFrame):
         self.validator = InputValidators()
         self.selected_row = None
         self.table_rows = []
+        self.orders_data = []  # Store current data for sorting
+        self.sort_column = 0  # Column index for sorting (0 = ID)
+        self.sort_ascending = True  # Sort direction
         
         self._create_widgets()
         self._load_data()
@@ -178,7 +181,10 @@ class OrdersTab(ctk.CTkFrame):
             row.destroy()
         self.table_rows.clear()
         
-        # Create header row
+        # Load data from database
+        self.orders_data = self.orders_repo.read_all()
+        
+        # Create header row with clickable columns
         header_row = ctk.CTkFrame(self.table_frame, fg_color="#1a1a1a", height=40)
         header_row.pack(fill="x", padx=0, pady=0)
         header_row.pack_propagate(False)
@@ -186,23 +192,31 @@ class OrdersTab(ctk.CTkFrame):
         headers = ['ID', 'Product', 'Supplier', 'Qty', 'Order Date', 'Delivery Date', 'Total Price', 'Status']
         widths = [30, 100, 100, 50, 100, 100, 80, 80]
         
-        for header, width in zip(headers, widths):
-            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a")
+        for col_idx, (header, width) in enumerate(zip(headers, widths)):
+            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a", cursor="hand2")
             col.pack(side="left", fill="y", padx=4, pady=8)
+            col.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+            
+            # Show sort indicator if this column is sorted
+            label_text = header
+            if col_idx == self.sort_column:
+                arrow = "▲" if self.sort_ascending else "▼"
+                label_text = f"{header} {arrow}"
+            
             lbl = ctk.CTkLabel(
                 col,
-                text=header,
+                text=label_text,
                 font=("Arial", 11, "bold"),
                 text_color="#3a7ebf",
                 width=width
             )
             lbl.pack(fill="both", expand=True)
+            lbl.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
         
         self.table_rows.append(header_row)
         
-        # Load data
-        orders = self.orders_repo.read_all()
-        for order in orders:
+        # Load data rows from orders_data
+        for order in self.orders_data:
             self._add_table_row(
                 order['id'],
                 order['produit_nom'],
@@ -332,9 +346,12 @@ class OrdersTab(ctk.CTkFrame):
             ErrorDialog.show(self, "Error", "Please add at least one supplier first")
             return
         
+        # Simplified fields - Supplier, Category, and Stock are displayed as info only
         fields = [
             ("Product", "dropdown", True),
-            ("Supplier", "dropdown", True),
+            ("Supplier", "info", False),
+            ("Category", "info", False),
+            ("Available Stock", "info", False),
             ("Quantity", "number", True),
             ("Delivery Date", "date", False),
             ("Total Price", "number", True)
@@ -342,28 +359,80 @@ class OrdersTab(ctk.CTkFrame):
         
         dialog = AddUpdateDialog(self, "Add Order", fields)
         
-        # Populate dropdowns
+        # Populate product dropdown
         product_names = [p['nom'] for p in products]
-        supplier_names = [s['nom'] for s in suppliers]
+        dialog.dropdowns['Product'].configure(values=product_names)
         
-        dialog.dropdowns['Product']['values'] = product_names
-        dialog.dropdowns['Supplier']['values'] = supplier_names
+        # Get references to info labels for updating
+        supplier_label = dialog.entries['Supplier']
+        category_label = dialog.entries['Category']
+        stock_label = dialog.entries['Available Stock']
+        quantity_entry = dialog.entries['Quantity']
+        
+        # Function to update supplier, category, and stock info when product is selected
+        def on_product_change(*args):
+            selected_product = dialog.dropdowns['Product'].get()
+            product = next((p for p in products if p['nom'] == selected_product), None)
+            
+            if product:
+                # Update supplier info
+                supplier_label.configure(text=product['fournisseur_nom'] or "N/A")
+                
+                # Update category info
+                category_label.configure(text=product['categorie_nom'] or "N/A")
+                
+                # Update stock info
+                stock_label.configure(text=f"{product['quantite_stock']} units available")
+                
+                # Clear quantity field when product changes
+                quantity_entry.delete(0, "end")
+        
+        # Bind product dropdown change event
+        dialog.dropdowns['Product'].bind("<<ComboboxSelected>>", on_product_change)
+        
+        # Set default product and trigger update
+        if product_names:
+            dialog.dropdowns['Product'].set(product_names[0])
+            on_product_change()  # Trigger auto-population for first product
         
         result = dialog.get_result()
         
         if result:
             # Find product and supplier IDs
             product = next((p for p in products if p['nom'] == result['Product']), None)
-            supplier = next((s for s in suppliers if s['nom'] == result['Supplier']), None)
+            supplier = next((s for s in suppliers if s['nom'] == result.get('Supplier', '')), None)
             
-            if not product or not supplier:
-                ErrorDialog.show(self, "Error", "Invalid product or supplier")
+            # If supplier not found via exact match, try to match by the displayed name
+            if not supplier:
+                supplier_name = supplier_label.cget("text")
+                supplier = next((s for s in suppliers if s['nom'] == supplier_name), None)
+            
+            if not product:
+                ErrorDialog.show(self, "Error", "Invalid product selected")
                 return
+            
+            # Validate quantity is provided and is a positive number
+            try:
+                quantity = int(result['Quantity'])
+                if quantity <= 0:
+                    ErrorDialog.show(self, "Error", "Quantity must be greater than 0")
+                    return
+            except ValueError:
+                ErrorDialog.show(self, "Error", "Please enter a valid quantity")
+                return
+            
+            # Check if there's enough stock
+            if product['quantite_stock'] < quantity:
+                ErrorDialog.show(self, "Error", f"Not enough stock!\nAvailable: {product['quantite_stock']}\nRequested: {quantity}")
+                return
+            
+            # Use the product's supplier ID if supplier not found
+            supplier_id = supplier['id'] if supplier else product['fournisseur_id']
             
             is_valid, error = self.validator.validate_order_form(
                 product['id'],
-                supplier['id'],
-                result['Quantity'],
+                supplier_id,
+                str(quantity),
                 result['Delivery Date'],
                 result['Total Price']
             )
@@ -374,14 +443,16 @@ class OrdersTab(ctk.CTkFrame):
             
             order_id = self.orders_repo.create(
                 product['id'],
-                supplier['id'],
-                int(result['Quantity']),
+                supplier_id,
+                quantity,
                 result['Delivery Date'] if result['Delivery Date'] else None,
                 float(result['Total Price'])
             )
             
             if order_id:
-                SuccessDialog.show(self, "Success", "Order added successfully")
+                # Decrease product stock
+                self.products_repo.update_quantity(product['id'], -quantity)
+                SuccessDialog.show(self, "Success", f"Order added successfully!\n{product['nom']} stock decreased by {quantity}")
                 self._load_data()
             else:
                 ErrorDialog.show(self, "Error", "Failed to add order")
@@ -402,9 +473,12 @@ class OrdersTab(ctk.CTkFrame):
         products = self.products_repo.read_all()
         suppliers = self.suppliers_repo.read_all()
         
+        # Simplified fields - Supplier and Category are displayed as info only
         fields = [
             ("Product", "dropdown", True),
-            ("Supplier", "dropdown", True),
+            ("Supplier", "info", False),
+            ("Category", "info", False),
+            ("Available Stock", "info", False),
             ("Quantity", "number", True),
             ("Delivery Date", "date", False),
             ("Total Price", "number", True),
@@ -413,7 +487,6 @@ class OrdersTab(ctk.CTkFrame):
         
         initial = {
             "Product": order['produit_nom'],
-            "Supplier": order['fournisseur_nom'],
             "Quantity": str(order['quantite']),
             "Delivery Date": self._format_date(order['date_livraison']),
             "Total Price": str(order['prix_total']),
@@ -422,29 +495,84 @@ class OrdersTab(ctk.CTkFrame):
         
         dialog = AddUpdateDialog(self, "Edit Order", fields, initial)
         
-        # Populate dropdowns
+        # Populate dropdowns with actual data using configure method
         product_names = [p['nom'] for p in products]
-        supplier_names = [s['nom'] for s in suppliers]
+        dialog.dropdowns['Product'].configure(values=product_names)
+        dialog.dropdowns['Status'].configure(values=['En attente', 'Livrée', 'Annulée'])
         
-        dialog.dropdowns['Product']['values'] = product_names
-        dialog.dropdowns['Supplier']['values'] = supplier_names
-        dialog.dropdowns['Status']['values'] = ['En attente', 'Livrée', 'Annulée']
+        # Get references to info labels for updating
+        supplier_label = dialog.entries['Supplier']
+        category_label = dialog.entries['Category']
+        stock_label = dialog.entries['Available Stock']
+        quantity_entry = dialog.entries['Quantity']
+        
+        # Function to update supplier, category, and stock info when product is selected
+        def on_product_change(*args):
+            selected_product = dialog.dropdowns['Product'].get()
+            product = next((p for p in products if p['nom'] == selected_product), None)
+            
+            if product:
+                # Update supplier info
+                supplier_label.configure(text=product['fournisseur_nom'] or "N/A")
+                
+                # Update category info
+                category_label.configure(text=product['categorie_nom'] or "N/A")
+                
+                # Update stock info (show total available + current order amount)
+                available = product['quantite_stock'] + order['quantite']
+                stock_label.configure(text=f"{available} units available")
+        
+        # Bind product dropdown change event
+        dialog.dropdowns['Product'].bind("<<ComboboxSelected>>", on_product_change)
+        
+        # Set default product and trigger update
+        if product_names:
+            dialog.dropdowns['Product'].set(product_names[0])
+            on_product_change()  # Trigger auto-population for first product
         
         result = dialog.get_result()
         
         if result:
             # Find product and supplier IDs
             product = next((p for p in products if p['nom'] == result['Product']), None)
-            supplier = next((s for s in suppliers if s['nom'] == result['Supplier']), None)
+            supplier = next((s for s in suppliers if s['nom'] == result.get('Supplier', '')), None)
             
-            if not product or not supplier:
-                ErrorDialog.show(self, "Error", "Invalid product or supplier")
+            # If supplier not found via exact match, try to match by the displayed name
+            if not supplier:
+                supplier_name = supplier_label.cget("text")
+                supplier = next((s for s in suppliers if s['nom'] == supplier_name), None)
+            
+            if not product:
+                ErrorDialog.show(self, "Error", "Invalid product selected")
                 return
+            
+            # Validate quantity is provided and is a positive number
+            try:
+                new_quantity = int(result['Quantity'])
+                if new_quantity <= 0:
+                    ErrorDialog.show(self, "Error", "Quantity must be greater than 0")
+                    return
+            except ValueError:
+                ErrorDialog.show(self, "Error", "Please enter a valid quantity")
+                return
+            
+            # Get old and new quantities
+            old_quantity = order['quantite']
+            quantity_difference = new_quantity - old_quantity
+            
+            # Check if there's enough stock for the new quantity
+            available_stock = product['quantite_stock'] + old_quantity  # Add back old quantity to see available
+            if available_stock < new_quantity:
+                ErrorDialog.show(self, "Error", f"Not enough stock!\nAvailable: {available_stock}\nRequested: {new_quantity}")
+                return
+            
+            # Use the product's supplier ID if supplier not found
+            supplier_id = supplier['id'] if supplier else product['fournisseur_id']
             
             is_valid, error = self.validator.validate_order_form(
                 product['id'],
-                supplier['id'],
-                result['Quantity'],
+                supplier_id,
+                str(new_quantity),
                 result['Delivery Date'],
                 result['Total Price']
             )
@@ -456,15 +584,37 @@ class OrdersTab(ctk.CTkFrame):
             success = self.orders_repo.update(
                 order_id,
                 product['id'],
-                supplier['id'],
-                int(result['Quantity']),
+                supplier_id,
+                new_quantity,
                 result['Delivery Date'] if result['Delivery Date'] else None,
                 float(result['Total Price']),
                 result['Status']
             )
             
             if success:
-                SuccessDialog.show(self, "Success", "Order updated successfully")
+                # Check if status changed to "Annulée" (cancelled)
+                old_status = order['statut']
+                new_status = result['Status']
+                
+                # Determine if order was just cancelled
+                was_cancelled = (old_status != "Annulée" and new_status == "Annulée")
+                
+                if was_cancelled:
+                    # Refund full order quantity when cancelled
+                    self.products_repo.update_quantity(product['id'], old_quantity)
+                    msg = f"Order cancelled successfully!\n{product['nom']} stock refunded by {old_quantity}"
+                else:
+                    # Adjust product stock based on quantity change (if not cancelled)
+                    if quantity_difference != 0:
+                        self.products_repo.update_quantity(product['id'], -quantity_difference)
+                        if quantity_difference > 0:
+                            msg = f"Order updated successfully!\n{product['nom']} stock decreased by {quantity_difference}"
+                        else:
+                            msg = f"Order updated successfully!\n{product['nom']} stock increased by {abs(quantity_difference)}"
+                    else:
+                        msg = "Order updated successfully!"
+                
+                SuccessDialog.show(self, "Success", msg)
                 self._load_data()
             else:
                 ErrorDialog.show(self, "Error", "Failed to update order")
@@ -484,12 +634,100 @@ class OrdersTab(ctk.CTkFrame):
             return
         
         order_product = order['produit_nom']
+        order_quantity = order['quantite']
         
-        if DeleteConfirmDialog.show(self, "Delete Order", f"Order for: {order_product}"):
+        if DeleteConfirmDialog.show(self, "Delete Order", f"Order for: {order_product}\nThis will refund {order_quantity} units to stock"):
             success = self.orders_repo.delete(order_id)
             
             if success:
-                SuccessDialog.show(self, "Success", "Order deleted successfully")
+                # Refund product stock
+                self.products_repo.update_quantity(order['produit_id'], order_quantity)
+                SuccessDialog.show(self, "Success", f"Order deleted successfully!\nStock refunded: {order_product} (+{order_quantity})")
                 self._load_data()
             else:
                 ErrorDialog.show(self, "Error", "Failed to delete order")
+    
+    def _on_sort_column(self, column_idx):
+        """Sort table by column - called when column header is clicked"""
+        # If clicking same column, toggle sort direction
+        if self.sort_column == column_idx:
+            self.sort_ascending = not self.sort_ascending
+        else:
+            self.sort_column = column_idx
+            self.sort_ascending = True
+        
+        # Define sort keys for each column
+        sort_keys = ['id', 'produit_nom', 'fournisseur_nom', 'quantite', 'date_commande', 'date_livraison', 'prix_total', 'statut']
+        key = sort_keys[column_idx]
+        
+        # Sort the data
+        if column_idx in [0, 3, 6]:  # ID, Qty, Total Price - numeric
+            try:
+                self.orders_data.sort(
+                    key=lambda x: float(x.get(key, 0)) if key == 'prix_total' else int(x.get(key, 0)),
+                    reverse=not self.sort_ascending
+                )
+            except (ValueError, TypeError):
+                self.orders_data.sort(
+                    key=lambda x: str(x.get(key, '')),
+                    reverse=not self.sort_ascending
+                )
+        else:  # String/Date columns - case-insensitive sort
+            self.orders_data.sort(
+                key=lambda x: str(x.get(key, '')).lower(),
+                reverse=not self.sort_ascending
+            )
+        
+        # Reload table with sorted data
+        self._reload_table_from_data()
+    
+    def _reload_table_from_data(self):
+        """Reload table display from sorted orders_data"""
+        # Clear table rows
+        for row in self.table_rows:
+            row.destroy()
+        self.table_rows.clear()
+        
+        # Recreate header row with sort indicator
+        header_row = ctk.CTkFrame(self.table_frame, fg_color="#1a1a1a", height=40)
+        header_row.pack(fill="x", padx=0, pady=0)
+        header_row.pack_propagate(False)
+        
+        headers = ['ID', 'Product', 'Supplier', 'Qty', 'Order Date', 'Delivery Date', 'Total Price', 'Status']
+        widths = [30, 100, 100, 50, 100, 100, 80, 80]
+        
+        for col_idx, (header, width) in enumerate(zip(headers, widths)):
+            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a", cursor="hand2")
+            col.pack(side="left", fill="y", padx=4, pady=8)
+            col.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+            
+            # Show sort indicator
+            label_text = header
+            if col_idx == self.sort_column:
+                arrow = "▲" if self.sort_ascending else "▼"
+                label_text = f"{header} {arrow}"
+            
+            lbl = ctk.CTkLabel(
+                col,
+                text=label_text,
+                font=("Arial", 11, "bold"),
+                text_color="#3a7ebf",
+                width=width
+            )
+            lbl.pack(fill="both", expand=True)
+            lbl.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+        
+        self.table_rows.append(header_row)
+        
+        # Add sorted data rows
+        for order in self.orders_data:
+            self._add_table_row(
+                order['id'],
+                order['produit_nom'],
+                order['fournisseur_nom'],
+                order['quantite'],
+                self._format_date(order['date_commande']),
+                self._format_date(order['date_livraison']),
+                f"{order['prix_total']:.2f}",
+                order['statut']
+            )

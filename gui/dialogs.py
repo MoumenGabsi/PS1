@@ -96,6 +96,15 @@ class AddUpdateDialog(ctk.CTkToplevel):
                 combo.pack(anchor="w", pady=(0, 8), fill="x")
                 self.dropdowns[field_name] = combo
                 self.entries[field_name] = combo
+            elif field_type == 'info':
+                # Read-only info field (displays value but not editable)
+                info_frame = ctk.CTkFrame(canvas_frame, fg_color="#2a2a2a", border_width=1, border_color="#3a7ebf")
+                info_frame.pack(anchor="w", pady=(0, 8), fill="x", padx=0)
+                
+                info_label = ctk.CTkLabel(info_frame, text="", text_color="#90ee90", font=("Arial", 11))
+                info_label.pack(anchor="w", padx=10, pady=8)
+                
+                self.entries[field_name] = info_label
             else:
                 entry = ctk.CTkEntry(canvas_frame, fg_color="#2a2a2a", text_color="#ffffff", 
                                     border_color="#3a7ebf", border_width=1)
@@ -107,6 +116,8 @@ class AddUpdateDialog(ctk.CTkToplevel):
                 value = initial_values[field_name]
                 if field_type == 'dropdown':
                     self.dropdowns[field_name].set(value)
+                elif field_type == 'info':
+                    self.entries[field_name].configure(text=str(value))
                 else:
                     entry.insert(0, str(value))
         
@@ -125,8 +136,10 @@ class AddUpdateDialog(ctk.CTkToplevel):
     def _on_save(self):
         """Collect form data and close"""
         self.result_data = {}
-        for field_name, entry in self.entries.items():
-            self.result_data[field_name] = entry.get()
+        # Only collect data from actual input fields, not info labels
+        for field_name, field_type, required in self.fields:
+            if field_type != 'info':  # Skip info fields
+                self.result_data[field_name] = self.entries[field_name].get()
         self.destroy()
     
     def _on_cancel(self):

@@ -190,6 +190,30 @@ class ProductsRepository:
             return []
 
     @staticmethod
+    def update_quantity(product_id, quantity_change):
+        """
+        Update product stock quantity (increment/decrement)
+        quantity_change: positive to add stock, negative to subtract stock
+        Returns: True if successful, False otherwise
+        """
+        try:
+            conn = get_connection('gestion_stock')
+            cursor = conn.cursor()
+
+            sql = """UPDATE produits 
+                     SET quantite_stock = quantite_stock + %s 
+                     WHERE id = %s"""
+            cursor.execute(sql, (quantity_change, product_id))
+
+            cursor.close()
+            close_connection(conn)
+            return cursor.rowcount > 0
+
+        except mysql.connector.Error as e:
+            print(f"❌ Error updating product quantity: {e}")
+            return False
+
+    @staticmethod
     def get_low_stock(threshold):
         """
         Get products below a stock threshold

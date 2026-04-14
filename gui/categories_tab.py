@@ -18,6 +18,9 @@ class CategoriesTab(ctk.CTkFrame):
         self.validator = InputValidators()
         self.selected_row = None
         self.table_rows = []
+        self.categories_data = []  # Store current data for sorting
+        self.sort_column = 0  # Column index for sorting (0 = ID)
+        self.sort_ascending = True  # Sort direction
         
         self._create_widgets()
         self._load_data()
@@ -150,7 +153,10 @@ class CategoriesTab(ctk.CTkFrame):
             row.destroy()
         self.table_rows.clear()
         
-        # Create header row
+        # Load data from database
+        self.categories_data = self.repo.read_all()
+        
+        # Create header row with clickable columns
         header_row = ctk.CTkFrame(self.table_frame, fg_color="#1a1a1a", height=40)
         header_row.pack(fill="x", padx=0, pady=0)
         header_row.pack_propagate(False)
@@ -158,23 +164,31 @@ class CategoriesTab(ctk.CTkFrame):
         headers = ['ID', 'Name', 'Description']
         widths = [30, 150, 400]
         
-        for i, (header, width) in enumerate(zip(headers, widths)):
-            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a")
+        for col_idx, (header, width) in enumerate(zip(headers, widths)):
+            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a", cursor="hand2")
             col.pack(side="left", fill="y", padx=4, pady=8)
+            col.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+            
+            # Show sort indicator if this column is sorted
+            label_text = header
+            if col_idx == self.sort_column:
+                arrow = "▲" if self.sort_ascending else "▼"
+                label_text = f"{header} {arrow}"
+            
             lbl = ctk.CTkLabel(
                 col,
-                text=header,
+                text=label_text,
                 font=("Arial", 11, "bold"),
                 text_color="#3a7ebf",
                 width=width
             )
             lbl.pack(fill="both", expand=True)
+            lbl.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
         
         self.table_rows.append(header_row)
         
-        # Load data
-        categories = self.repo.read_all()
-        for category in categories:
+        # Load data rows from categories_data
+        for category in self.categories_data:
             self._add_table_row(
                 category['id'],
                 category['nom'],
@@ -377,3 +391,83 @@ class CategoriesTab(ctk.CTkFrame):
                 self._load_data()
             else:
                 ErrorDialog.show(self, "Error", "Failed to delete category")
+    
+    def _on_sort_column(self, column_idx):
+        """Sort table by column - called when column header is clicked"""
+        # If clicking same column, toggle sort direction
+        if self.sort_column == column_idx:
+            self.sort_ascending = not self.sort_ascending
+        else:
+            self.sort_column = column_idx
+            self.sort_ascending = True
+        
+        # Define sort keys for each column
+        sort_keys = ['id', 'nom', 'description']
+        key = sort_keys[column_idx]
+        
+        # Sort the data
+        if column_idx == 0:  # ID column - numeric sort
+            try:
+                self.categories_data.sort(
+                    key=lambda x: int(x.get(key, 0)),
+                    reverse=not self.sort_ascending
+                )
+            except (ValueError, TypeError):
+                self.categories_data.sort(
+                    key=lambda x: str(x.get(key, '')),
+                    reverse=not self.sort_ascending
+                )
+        else:  # String columns - case-insensitive sort
+            self.categories_data.sort(
+                key=lambda x: str(x.get(key, '')).lower(),
+                reverse=not self.sort_ascending
+            )
+        
+        # Reload table with sorted data
+        self._reload_table_from_data()
+    
+    def _reload_table_from_data(self):
+        """Reload table display from sorted categories_data"""
+        # Clear table rows
+        for row in self.table_rows:
+            row.destroy()
+        self.table_rows.clear()
+        
+        # Recreate header row with sort indicator
+        header_row = ctk.CTkFrame(self.table_frame, fg_color="#1a1a1a", height=40)
+        header_row.pack(fill="x", padx=0, pady=0)
+        header_row.pack_propagate(False)
+        
+        headers = ['ID', 'Name', 'Description']
+        widths = [30, 150, 400]
+        
+        for col_idx, (header, width) in enumerate(zip(headers, widths)):
+            col = ctk.CTkFrame(header_row, width=width, fg_color="#1a1a1a", cursor="hand2")
+            col.pack(side="left", fill="y", padx=4, pady=8)
+            col.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+            
+            # Show sort indicator
+            label_text = header
+            if col_idx == self.sort_column:
+                arrow = "▲" if self.sort_ascending else "▼"
+                label_text = f"{header} {arrow}"
+            
+            lbl = ctk.CTkLabel(
+                col,
+                text=label_text,
+                font=("Arial", 11, "bold"),
+                text_color="#3a7ebf",
+                width=width
+            )
+            lbl.pack(fill="both", expand=True)
+            lbl.bind("<Button-1>", lambda e, idx=col_idx: self._on_sort_column(idx))
+        
+        self.table_rows.append(header_row)
+        
+        # Add sorted data rows
+        for category in self.categories_data:
+            self._add_table_row(
+                category['id'],
+                category['nom'],
+                category['description'] or ''
+            )
